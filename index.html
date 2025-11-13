@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>アウトラインフォント vs ビットマップフォント（96×96ドット）</title>
+<style>
+  body {
+    font-family: "Segoe UI", sans-serif;
+    background: #fafafa;
+    text-align: center;
+  }
+  h2 {
+    margin-top: 10px;
+  }
+  #controlPanel {
+    margin: 10px;
+  }
+  input[type="text"] {
+    font-size: 1.2em;
+    width: 500px;
+    padding: 5px;
+  }
+  .canvas-container {
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    gap: 30px;
+    margin-top: 10px;
+  }
+  .canvas-block {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    border-radius: 10px;
+    padding: 10px;
+  }
+  .outline-block {
+    background: #e3f2fd;
+  }
+  .bitmap-block {
+    background: #fff3e0;
+  }
+  canvas {
+    border: 1px solid #ccc;
+    background: white;
+    cursor: grab;
+  }
+  label {
+    font-weight: bold;
+  }
+  .slider {
+    width: 300px;
+  }
+  .slider-label {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
+  #resetBtn {
+    margin: 10px;
+    padding: 6px 16px;
+    font-size: 1em;
+  }
+</style>
+</head>
+<body>
+  <h2>アウトラインフォント vs ビットマップフォント（96×96ドット）</h2>
+
+  <div id="controlPanel">
+    <input id="textInput" type="text" placeholder="ひらがな・カタカナ・英文字">
+    <select id="fontSelect">
+      <option value="serif">Serif</option>
+      <option value="sans-serif">Sans-serif</option>
+      <option value="monospace">Monospace</option>
+      <option value="cursive">Cursive</option>
+    </select>
+    <button id="resetBtn">拡大率リセット</button>
+    <label><input type="checkbox" id="antialiasToggle" checked> アンチエイリアス表示ON</label>
+  </div>
+
+  <div class="canvas-container">
+    <div class="canvas-block outline-block">
+      <h3>アウトラインフォント</h3>
+      <canvas id="outlineCanvas" width="600" height="600"></canvas>
+      <div class="slider-label">
+        <input id="outlineScale" type="range" class="slider" min="1" max="100" value="10">
+        <span id="outlineScaleValue">10</span>×
+      </div>
+    </div>
+
+    <div class="canvas-block bitmap-block">
+      <h3>ビットマップフォント（96×96ドット）</h3>
+      <canvas id="bitmapCanvas" width="600" height="600"></canvas>
+      <div class="slider-label">
+        <input id="bitmapScale" type="range" class="slider" min="1" max="100" value="10">
+        <span id="bitmapScaleValue">10</span>×
+      </div>
+    </div>
+  </div>
+
+<script>
+const outlineCanvas = document.getElementById("outlineCanvas");
+const bitmapCanvas = document.getElementById("bitmapCanvas");
+const octx = outlineCanvas.getContext("2d");
+const bctx = bitmapCanvas.getContext("2d");
+
+let outlineScale = 10;
+let bitmapScale = 10;
+let antialias = true;
+
+const outlineScaleSlider = document.getElementById("outlineScale");
+const bitmapScaleSlider = document.getElementById("bitmapScale");
+const outlineScaleValue = document.getElementById("outlineScaleValue");
+const bitmapScaleValue = document.getElementById("bitmapScaleValue");
+const textInput = document.getElementById("textInput");
+const fontSelect = document.getElementById("fontSelect");
+
+// ドラッグ用変数
+let draggingOutline = false, draggingBitmap = false;
+let outlineOffset = {x: 300, y: 300};
+let bitmapOffset = {x: 300, y: 300};
+let prevMouse = {x: 0, y: 0};
+
+// ビットマップ生成解像度
+const bitmapSize = 96;
+
+function drawOutline() {
+  const text = textInput.value || "あ";
+  const font = fontSelect.value;
+  octx.clearRect(0, 0, outlineCanvas.width, outlineCanvas.height);
+  octx.save();
+  octx.translate(outlineOffset.x, outlineOffset.y);
+  octx.scale(outlineScale, outlineScale);
+  octx.font = `${10}px ${font}`;
+  octx.textBaseline = "middle";
+  octx.textAlign = "center";
+  octx.fillText(text, 0, 0);
+  octx.restore();
+}
+
+function drawBitmap() {
+  const text = textInput.value || "あ";
+  const font = fontSelect.value;
+  bctx.clearRect(0, 0, bitmapCanvas.width, bitmapCanvas.height);
+
+  // 文字を96x96のオフスクリーンキャンバスに描画
+  const off = document.createElement("canvas");
+  off.width = off.height = bitmapSize;
+  const offCtx = off.getContext("2d");
+  offCtx.font = `${bitmapSize * 0.7}px ${font}`;
+  offCtx.textBaseline = "middle";
+  offCtx.textAlign = "center";
+  offCtx.fillText(text, bitmapSize / 2, bitmapSize / 2);
+
+  // ピクセルデータ取得
+  const imgData = offCtx.getImageData(0, 0, bitmapSize, bitmapSize).data;
+
+  const scale = bitmapScale * 0.2; // ドット拡大倍率
+  const startX = bitmapOffset.x - (bitmapSize / 2) * scale;
+  const startY = bitmapOffset.y - (bitmapSize / 2) * scale;
+
+  for (let y = 0; y < bitmapSize; y++) {
+    for (let x = 0; x < bitmapSize; x++) {
+      const i = (y * bitmapSize + x) * 4;
+      const alpha = imgData[i + 3];
+      if (alpha > 128) {
+        bctx.fillStyle = "#000";
+        bctx.fillRect(startX + x * scale, startY + y * scale, scale, scale);
+      }
+    }
+  }
+}
+
+// 共通描画更新
+function render() {
+  octx.imageSmoothingEnabled = antialias;
+  bctx.imageSmoothingEnabled = antialias;
+  drawOutline();
+  drawBitmap();
+}
+
+// スライダー操作
+outlineScaleSlider.addEventListener("input", e => {
+  outlineScale = Number(e.target.value);
+  outlineScaleValue.textContent = outlineScale;
+  render();
+});
+bitmapScaleSlider.addEventListener("input", e => {
+  bitmapScale = Number(e.target.value);
+  bitmapScaleValue.textContent = bitmapScale;
+  render();
+});
+
+// 拡大率リセット
+document.getElementById("resetBtn").addEventListener("click", () => {
+  outlineScale = bitmapScale = 10;
+  outlineScaleSlider.value = bitmapScaleSlider.value = 10;
+  outlineScaleValue.textContent = bitmapScaleValue.textContent = 10;
+  render();
+});
+
+// 入力・フォント変更
+textInput.addEventListener("input", render);
+fontSelect.addEventListener("change", render);
+
+// アンチエイリアス切替
+document.getElementById("antialiasToggle").addEventListener("change", e => {
+  antialias = e.target.checked;
+  render();
+});
+
+// マウス操作（アウトライン）
+outlineCanvas.addEventListener("mousedown", e => {
+  draggingOutline = true;
+  prevMouse = {x: e.offsetX, y: e.offsetY};
+  outlineCanvas.style.cursor = "grabbing";
+});
+outlineCanvas.addEventListener("mouseup", () => {
+  draggingOutline = false;
+  outlineCanvas.style.cursor = "grab";
+});
+outlineCanvas.addEventListener("mousemove", e => {
+  if (draggingOutline) {
+    outlineOffset.x += e.offsetX - prevMouse.x;
+    outlineOffset.y += e.offsetY - prevMouse.y;
+    prevMouse = {x: e.offsetX, y: e.offsetY};
+    render();
+  }
+});
+
+// マウス操作（ビットマップ）
+bitmapCanvas.addEventListener("mousedown", e => {
+  draggingBitmap = true;
+  prevMouse = {x: e.offsetX, y: e.offsetY};
+  bitmapCanvas.style.cursor = "grabbing";
+});
+bitmapCanvas.addEventListener("mouseup", () => {
+  draggingBitmap = false;
+  bitmapCanvas.style.cursor = "grab";
+});
+bitmapCanvas.addEventListener("mousemove", e => {
+  if (draggingBitmap) {
+    bitmapOffset.x += e.offsetX - prevMouse.x;
+    bitmapOffset.y += e.offsetY - prevMouse.y;
+    prevMouse = {x: e.offsetX, y: e.offsetY};
+    render();
+  }
+});
+
+render();
+</script>
+</body>
+</html>
